@@ -254,6 +254,17 @@ fun AppUi(vm: GuViewModel, onRequestPermissions: () -> Unit) {
                             }
                         }
                     }
+                    if (state.crashLog.isNotBlank()) {
+                        item {
+                            Card(colors = CardDefaults.cardColors(containerColor = Color(0xFFFDECEA))) {
+                                Column(Modifier.padding(16.dp)) {
+                                    Text("Log crash terakhir (buat laporan)", fontWeight = FontWeight.Bold)
+                                    Text(state.crashLog, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                                    OutlinedButton(onClick = { vm.clearCrashLog() }) { Text("Hapus Log Crash") }
+                                }
+                            }
+                        }
+                    }
                     item { Text("Log", fontWeight = FontWeight.Bold) }
                     items(state.logs) { log ->
                         Text(

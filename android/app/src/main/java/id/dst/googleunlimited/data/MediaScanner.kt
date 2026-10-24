@@ -51,7 +51,11 @@ fun sha256Of(context: Context, item: MediaItem): String? {
     }
 }
 
-/** Scan Camera / Pictures / Downloads / Movies via MediaStore (scoped storage, no broad access). */
+/** Scan Camera / Pictures / Downloads / Movies via MediaStore (scoped storage, no broad access).
+ * NOTE (crash fix 1.0.1): the old DATA (_data) column is deliberately NOT requested.
+ * On Android 10+ it is deprecated / hidden and requesting it is a known source of
+ * provider failures. Files are always opened through their content Uri instead,
+ * so upload still works via the private cache copy. */
 fun scanMedia(context: Context): List<MediaItem> {
     val out = mutableListOf<MediaItem>()
     val collections = listOf(
@@ -63,8 +67,7 @@ fun scanMedia(context: Context): List<MediaItem> {
             MediaStore.MediaColumns._ID,
             MediaStore.MediaColumns.DISPLAY_NAME,
             MediaStore.MediaColumns.SIZE,
-            MediaStore.MediaColumns.DATE_MODIFIED,
-            MediaStore.MediaColumns.DATA
+            MediaStore.MediaColumns.DATE_MODIFIED
         )
         try {
             context.contentResolver.query(collection, projection, null, null, null)?.use { c ->
@@ -72,17 +75,15 @@ fun scanMedia(context: Context): List<MediaItem> {
                 val nameCol = c.getColumnIndexOrThrow(MediaStore.MediaColumns.DISPLAY_NAME)
                 val sizeCol = c.getColumnIndexOrThrow(MediaStore.MediaColumns.SIZE)
                 val modCol = c.getColumnIndexOrThrow(MediaStore.MediaColumns.DATE_MODIFIED)
-                val dataCol = c.getColumnIndex(MediaStore.MediaColumns.DATA)
                 while (c.moveToNext()) {
                     val name = c.getString(nameCol) ?: continue
                     val ext = name.substringAfterLast('.', "").lowercase()
                     if (ext !in MEDIA_EXTENSIONS) continue
                     val size = c.getLong(sizeCol)
                     if (size < 10 * 1024) continue
-                    val path = if (dataCol >= 0) c.getString(dataCol) else null
                     out += MediaItem(
                         uri = Uri.withAppendedPath(collection, c.getLong(idCol).toString()),
-                        name = name, size = size, path = path,
+                        name = name, size = size, path = null,
                         modifiedEpochSec = c.getLong(modCol)
                     )
                 }

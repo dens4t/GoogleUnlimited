@@ -45,7 +45,8 @@ data class UiState(
     val progressText: String = "",
     val syncedThisRun: Int = 0,
     val failedThisRun: Int = 0,
-    val message: String = ""
+    val message: String = "",
+    val crashLog: String = ""
 )
 
 class GuViewModel(app: Application) : AndroidViewModel(app) {
@@ -63,26 +64,56 @@ class GuViewModel(app: Application) : AndroidViewModel(app) {
     init {
         refresh()
         viewModelScope.launch(Dispatchers.IO) {
-            val status = GotohpEngine.probe(app)
-            val sha = if (GotohpEngine.isInstalled(app)) GotohpEngine.sha256Of(GotohpEngine.binaryFile(app)) else null
-            _state.update { it.copy(engineStatus = status, engineSha = sha) }
+            try {
+                val status = GotohpEngine.probe(app)
+                val sha = if (GotohpEngine.isInstalled(app)) GotohpEngine.sha256Of(GotohpEngine.binaryFile(app)) else null
+                _state.update { it.copy(engineStatus = status, engineSha = sha) }
+            } catch (e: Exception) {
+                _state.update { it.copy(engineStatus = "Gagal cek engine: ${e.message}") }
+            }
         }
+    }
+
+    fun crashLogText(): String = try {
+        val f = File(getApplication<Application>().filesDir, "crash.log")
+        if (f.exists()) f.readText().takeLast(4000) else ""
+    } catch (_: Exception) {
+        ""
+    }
+
+    fun clearCrashLog() {
+        try {
+            File(getApplication<Application>().filesDir, "crash.log").delete()
+        } catch (_: Exception) {
+        }
+        _state.update { it.copy(crashLog = "") }
     }
 
     fun refresh() {
         viewModelScope.launch(Dispatchers.IO) {
-            val (up, retry, _) = db.stats()
-            val recent = db.recentUploads()
-            val logs = db.logs()
-            val scanned = scanMedia(getApplication())
-            val queue = scanned.filter { item ->
-                !db.isUploaded(item.uri.toString(), item.name, item.size, null)
-            }
-            _state.update {
-                it.copy(
-                    uploadedCount = up, retryCount = retry,
-                    queue = queue, recent = recent, logs = logs
-                )
+            try {
+                val (up, retry, _) = db.stats()
+                val recent = db.recentUploads()
+                val logs = db.logs()
+                val scanned = scanMedia(getApplication())
+                val queue = scanned.filter { item ->
+                    try {
+                        !db.isUploaded(item.uri.toString(), item.name, item.size, null)
+                    } catch (_: Exception) {
+                        true
+                    }
+                }
+                _state.update {
+                    it.copy(
+                        uploadedCount = up, retryCount = retry,
+                        queue = queue, recent = recent, logs = logs,
+                        crashLog = crashLogText()
+                    )
+                }
+            } catch (e: Exception) {
+                // Crash fix 1.0.1: an uncaught coroutine exception used to kill the
+                // whole app. Now a scan/DB failure only shows a message.
+                _state.update { it.copy(message = "Gagal memindai: ${e.message}", crashLog = crashLogText()) }
             }
         }
     }
@@ -105,6 +136,7 @@ class GuViewModel(app: Application) : AndroidViewModel(app) {
         }
         if (syncJob?.isActive == true) return
         syncJob = viewModelScope.launch(Dispatchers.IO) {
+            try {
             _state.update { it.copy(isSyncing = true, syncedThisRun = 0, failedThisRun = 0, message = "") }
             val queue = _state.value.queue
             val nowSec = System.currentTimeMillis() / 1000
@@ -139,6 +171,10 @@ class GuViewModel(app: Application) : AndroidViewModel(app) {
             _state.update {
                 it.copy(message = "Selesai: ${it.syncedThisRun} terupload, ${it.failedThisRun} gagal.")
             }
+            } catch (e: Exception) {
+                _state.update { it.copy(isSyncing = false, progressText = "", message = "Sync berhenti karena error: ${e.message}") }
+                refresh()
+            }
         }
     }
 
@@ -171,6 +207,7 @@ class GuViewModel(app: Application) : AndroidViewModel(app) {
         }
         viewModelScope.launch(Dispatchers.IO) {
             _state.update { it.copy(isBusy = true, message = "Menyimpan kredensial…") }
+            try {
             val r = GotohpEngine.credsAdd(app, token)
             // Token TIDAK pernah disimpan di prefs/log — hanya diteruskan ke gotohp.config privat.
             val list = GotohpEngine.credsList(app)
@@ -183,14 +220,21 @@ class GuViewModel(app: Application) : AndroidViewModel(app) {
                     else "creds add gagal (exit ${r.exitCode}). Cek log."
                 )
             }
+            } catch (e: Exception) {
+                _state.update { it.copy(isBusy = false, message = "Gagal simpan kredensial: ${e.message}") }
+            }
         }
     }
 
     fun listAccounts() {
         val app = getApplication<Application>()
         viewModelScope.launch(Dispatchers.IO) {
-            val list = GotohpEngine.credsList(app)
-            _state.update { it.copy(accountText = list.output.trim().take(500)) }
+            try {
+                val list = GotohpEngine.credsList(app)
+                _state.update { it.copy(accountText = list.output.trim().take(500)) }
+            } catch (e: Exception) {
+                _state.update { it.copy(message = "Gagal baca akun: ${e.message}") }
+            }
         }
     }
 
@@ -203,8 +247,12 @@ class GuViewModel(app: Application) : AndroidViewModel(app) {
     fun setAutoSync(value: Boolean) {
         prefs.edit().putBoolean("auto_sync", value).apply()
         _state.update { it.copy(autoSync = value) }
-        if (value) schedulePeriodic()
-        else WorkManager.getInstance(getApplication()).cancelUniqueWork("gu_periodic")
+        try {
+            if (value) schedulePeriodic()
+            else WorkManager.getInstance(getApplication()).cancelUniqueWork("gu_periodic")
+        } catch (e: Exception) {
+            _state.update { it.copy(autoSync = false, message = "Gagal atur sync latar: ${e.message}") }
+        }
     }
 
     private fun schedulePeriodic() {
