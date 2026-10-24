@@ -551,6 +551,16 @@ CREATE TABLE logs (
 
 ---
 
+## Android
+
+Versi Android (Native Kotlin + Jetpack Compose, ringan) ada di folder
+[`android/`](android/README.md) — pindai MediaStore, dedup SHA-256, antrean
+retry 3x, dan sync latar WorkManager, dengan mesin upload `gotohp-cli` yang
+sama. Build otomatis lewat GitHub Actions (`.github/workflows/android.yml`)
+dan APK debug-nya tersimpan sebagai artifact. Baca `android/README.md` dulu
+untuk batasan & risikonya: ini utilitas tidak resmi, dan "unlimited" bukan
+jaminan dari Google.
+
 ## Credits and License
 
 - **Google Photos Engine**: Powered by [`xob0t/gotohp`](https://github.com/xob0t/gotohp) by [xob0t](https://github.com/xob0t) (licensed under the GNU General Public License v3.0).
